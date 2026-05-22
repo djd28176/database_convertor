@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数据库转换工具</title>
+    <style>
+        :root {
+            --bg: #f4efe6;
+            --panel: rgba(255, 252, 246, 0.88);
+            --line: #d8ccb9;
+            --text: #2d2a26;
+            --muted: #6b665f;
+            --accent: #0f766e;
+            --accent-soft: #d8f1ed;
+            --danger: #b91c1c;
+            --shadow: 0 18px 48px rgba(55, 40, 25, 0.12);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+            color: var(--text);
+            background:
+                radial-gradient(circle at top left, rgba(15, 118, 110, 0.14), transparent 32%),
+                radial-gradient(circle at bottom right, rgba(164, 116, 62, 0.18), transparent 28%),
+                linear-gradient(135deg, #f7f2ea 0%, #efe4d4 100%);
+            min-height: 100vh;
+        }
+
+        .container {
+            width: min(1180px, calc(100% - 32px));
+            margin: 32px auto 48px;
+        }
+
+        .hero {
+            padding: 28px;
+            border: 1px solid rgba(216, 204, 185, 0.9);
+            border-radius: 28px;
+            background: rgba(255, 252, 246, 0.7);
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(14px);
+        }
+
+        .hero h1 {
+            margin: 0 0 8px;
+            font-size: clamp(30px, 4vw, 46px);
+            font-weight: 700;
+            letter-spacing: 0.04em;
+        }
+
+        .hero p {
+            margin: 0;
+            color: var(--muted);
+            line-height: 1.7;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 20px;
+            margin-top: 22px;
+        }
+
+        .panel {
+            background: var(--panel);
+            border: 1px solid rgba(216, 204, 185, 0.9);
+            border-radius: 24px;
+            padding: 22px;
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(8px);
+        }
+
+        .panel h2 {
+            margin: 0 0 16px;
+            font-size: 22px;
+        }
+
+        .db-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .full {
+            grid-column: 1 / -1;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 13px;
+            color: var(--muted);
+        }
+
+        input, select, textarea, button {
+            width: 100%;
+            border-radius: 14px;
+            border: 1px solid var(--line);
+            padding: 11px 12px;
+            font-size: 14px;
+            background: rgba(255, 255, 255, 0.82);
+            color: var(--text);
+        }
+
+        textarea {
+            min-height: 220px;
+            resize: vertical;
+            font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+            line-height: 1.55;
+        }
+
+        button {
+            cursor: pointer;
+            border: none;
+            background: linear-gradient(135deg, #0f766e, #115e59);
+            color: white;
+            font-weight: 600;
+            transition: transform 0.18s ease, box-shadow 0.18s ease;
+            box-shadow: 0 10px 24px rgba(15, 118, 110, 0.22);
+        }
+
+        button:hover {
+            transform: translateY(-1px);
+        }
+
+        button.secondary {
+            background: linear-gradient(135deg, #a16207, #92400e);
+            box-shadow: 0 10px 24px rgba(146, 64, 14, 0.18);
+        }
+
+        .hint {
+            margin-top: 12px;
+            font-size: 13px;
+            color: var(--muted);
+            line-height: 1.7;
+        }
+
+        .table-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 8px;
+            max-height: 220px;
+            overflow: auto;
+            padding: 10px;
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.7);
+        }
+
+        .table-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+        }
+
+        .table-item input {
+            width: auto;
+            margin: 0;
+        }
+
+        .status {
+            margin-top: 12px;
+            min-height: 22px;
+            font-size: 14px;
+            color: var(--muted);
+        }
+
+        .status.error {
+            color: var(--danger);
+        }
+
+        .actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 12px;
+        }
+
+        .actions button {
+            flex: 1 1 180px;
+        }
+
+        .password-field {
+            position: relative;
+        }
+
+        .password-field input {
+            padding-right: 46px;
+        }
+
+        .toggle-password {
+            position: absolute;
+            top: 50%;
+            right: 10px;
+            transform: translateY(-50%);
+            width: 28px;
+            height: 28px;
+            min-width: 28px;
+            padding: 0;
+            border-radius: 999px;
+            border: none;
+            background: transparent;
+            box-shadow: none;
+            color: var(--muted);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .toggle-password:hover {
+            transform: translateY(-50%);
+            background: rgba(15, 23, 42, 0.08);
+        }
+
+        .toggle-password svg {
+            width: 18px;
+            height: 18px;
+            stroke: currentColor;
+        }
+
+        .toggle-password[data-visible="true"] .eye-open {
+            display: none;
+        }
+
+        .toggle-password[data-visible="false"] .eye-closed {
+            display: none;
+        }
+
+        @media (max-width: 768px) {
+            .db-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <section class="hero">
+        <h1>数据库转换工具</h1>
+        <p>支持 MySQL、SQL Server、DM 三种数据库之间的表结构与 SQL 方言转换。你可以先读取源库表清单，再选择是否携带数据生成目标库脚本。</p>
+    </section>
+
+    <div class="grid">
+        <section class="panel">
+            <h2>数据库转换</h2>
+            <div class="db-grid">
+                <div>
+                    <label for="sourceType">源数据库类型</label>
+                    <select id="sourceType">
+                        <option value="MYSQL">MySQL</option>
+                        <option value="SQLSERVER">SQL Server</option>
+                        <option value="DM">DM</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="targetType">目标数据库类型</label>
+                    <select id="targetType">
+                        <option value="MYSQL">MySQL</option>
+                        <option value="SQLSERVER">SQL Server</option>
+                        <option value="DM">DM</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="sourceHost">源 Host</label>
+                    <input id="sourceHost" value="127.0.0.1">
+                </div>
+                <div>
+                    <label for="sourcePort">源 Port</label>
+                    <input id="sourcePort" placeholder="默认按数据库类型自动带出">
+                </div>
+                <div>
+                    <label for="sourceDatabase">源数据库名</label>
+                    <input id="sourceDatabase">
+                </div>
+                <div>
+                    <label for="sourceSchema">源 Schema</label>
+                    <input id="sourceSchema" placeholder="SQL Server 常见 dbo，DM 必填">
+                </div>
+                <div>
+                    <label for="sourceUsername">源用户名</label>
+                    <input id="sourceUsername">
+                </div>
+                <div>
+                    <label for="sourcePassword">源密码</label>
+                    <div class="password-field">
+                        <input id="sourcePassword" type="password">
+                        <button type="button" class="toggle-password" data-target="sourcePassword" data-visible="false" aria-label="显示密码">
+                            <svg class="eye-open" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"></path>
+                                <circle cx="12" cy="12" r="3"></circle>
+                            </svg>
+                            <svg class="eye-closed" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M3 3l18 18"></path>
+                                <path d="M10.6 10.7a3 3 0 0 0 4.2 4.2"></path>
+                                <path d="M9.4 5.2A10.7 10.7 0 0 1 12 5c6.5 0 10 7 10 7a18.2 18.2 0 0 1-4.1 4.9"></path>
+                                <path d="M6.7 6.7A18.6 18.6 0 0 0 2 12s3.5 7 10 7a10.6 10.6 0 0 0 5.3-1.4"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="full">
+                    <label for="sourceJdbcUrl">源 JDBC URL（可选，填了则优先）</label>
+                    <input id="sourceJdbcUrl" placeholder="例如 jdbc:mysql://127.0.0.1:3306/demo">
+                </div>
+
+                <div>
+                    <label for="targetHost">目标 Host</label>
+                    <input id="targetHost" value="127.0.0.1">
+                </div>
+                <div>
+                    <label for="targetPort">目标 Port</label>
+                    <input id="targetPort">
+                </div>
+                <div>
+                    <label for="targetDatabase">目标数据库名</label>
+                    <input id="targetDatabase">
+                </div>
+                <div>
+                    <label for="targetSchema">目标 Schema</label>
+                    <input id="targetSchema" placeholder="DM 必填">
+                </div>
+                <div>
+                    <label for="targetUsername">目标用户名</label>
+                    <input id="targetUsername">
+                </div>
+                <div>
+                    <label for="targetPassword">目标密码</label>
+                    <div class="password-field">
+                        <input id="targetPassword" type="password">
+                        <button type="button" class="toggle-password" data-target="targetPassword" data-visible="false" aria-label="显示密码">
+                            <svg class="eye-open" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"></path>
+                                <circle cx="12" cy="12" r="3"></circle>
+                            </svg>
+                            <svg class="eye-closed" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M3 3l18 18"></path>
+                                <path d="M10.6 10.7a3 3 0 0 0 4.2 4.2"></path>
+                                <path d="M9.4 5.2A10.7 10.7 0 0 1 12 5c6.5 0 10 7 10 7a18.2 18.2 0 0 1-4.1 4.9"></path>
+                                <path d="M6.7 6.7A18.6 18.6 0 0 0 2 12s3.5 7 10 7a10.6 10.6 0 0 0 5.3-1.4"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="full">
+                    <label for="targetJdbcUrl">目标 JDBC URL（可选）</label>
+                    <input id="targetJdbcUrl">
+                </div>
+            </div>
+
+            <div class="actions">
+                <button type="button" id="loadTablesBtn" class="secondary">读取源库表列表</button>
+                <button type="button" id="convertDbBtn">生成目标 SQL</button>
+                <button type="button" id="downloadDbBtn" class="secondary">下载结果</button>
+            </div>
+
+            <div class="hint">
+                可选择是否包含数据；如果勾选“直接执行到目标库”，会使用目标库连接执行生成的脚本。
+            </div>
+
+            <div style="margin-top: 16px;">
+                <label><input type="checkbox" id="includeData" style="width:auto;"> 包含数据</label>
+                <label><input type="checkbox" id="executeOnTarget" style="width:auto;"> 直接执行到目标库</label>
+            </div>
+
+            <div style="margin-top: 16px;">
+                <label>可选表</label>
+                <div id="tableList" class="table-list"></div>
+            </div>
+
+            <div id="dbStatus" class="status"></div>
+        </section>
+
+        <section class="panel">
+            <h2>SQL 文件转换</h2>
+            <div class="db-grid">
+                <div class="full">
+                    <label for="sqlTargetType">目标数据库类型</label>
+                    <select id="sqlTargetType">
+                        <option value="MYSQL">MySQL</option>
+                        <option value="SQLSERVER">SQL Server</option>
+                        <option value="DM">DM</option>
+                    </select>
+                </div>
+                <div class="full">
+                    <label for="sqlFile">上传 SQL 文件</label>
+                    <input id="sqlFile" type="file" accept=".sql,text/plain">
+                </div>
+                <div class="full">
+                    <label for="sqlTargetSchema">目标 Schema / 模式名</label>
+                    <input id="sqlTargetSchema" placeholder="转换为 DM 时必填，例如 SYSDBA">
+                </div>
+            </div>
+
+            <div class="actions">
+                <button type="button" id="convertSqlBtn">转换 SQL 文件</button>
+                <button type="button" id="downloadBtn" class="secondary">下载结果</button>
+            </div>
+
+            <div id="sqlStatus" class="status"></div>
+        </section>
+    </div>
+
+    <div class="grid">
+        <section class="panel">
+            <h2>数据字典模板填写</h2>
+            <div class="db-grid">
+                <div class="full">
+                    <label for="dictionaryTemplate">上传 Excel 模板</label>
+                    <input id="dictionaryTemplate" type="file" accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+                </div>
+                <div class="full">
+                    <label for="dictionarySqlFile">上传建表 SQL（按 SQL 生成时使用）</label>
+                    <input id="dictionarySqlFile" type="file" accept=".sql,text/plain">
+                </div>
+            </div>
+
+            <div class="actions">
+                <button type="button" id="generateDictionaryFromDbBtn">根据源库生成字典</button>
+                <button type="button" id="generateDictionaryFromSqlBtn" class="secondary">根据 SQL 生成字典</button>
+            </div>
+
+            <div class="hint">
+                会自动在模板中填写这几列：数据表（中文）、数据表（英文）、数据类型、字段名称（英文）、字段名称（中文）。
+            </div>
+
+            <div id="dictionaryStatus" class="status"></div>
+        </section>
+    </div>
+
+    <section class="panel" style="margin-top: 20px;">
+        <h2>输出结果</h2>
+        <textarea id="resultArea" placeholder="这里会显示生成后的 SQL 或转换结果"></textarea>
+    </section>
+</div>
+
+<script>
+    const tableList = document.getElementById("tableList");
+    const resultArea = document.getElementById("resultArea");
+    const dbStatus = document.getElementById("dbStatus");
+    const sqlStatus = document.getElementById("sqlStatus");
+    const dictionaryStatus = document.getElementById("dictionaryStatus");
+
+    document.getElementById("loadTablesBtn").addEventListener("click", loadTables);
+    document.getElementById("convertDbBtn").addEventListener("click", convertDatabase);
+    document.getElementById("downloadDbBtn").addEventListener("click", downloadResult);
+    document.getElementById("convertSqlBtn").addEventListener("click", convertSqlFile);
+    document.getElementById("downloadBtn").addEventListener("click", downloadResult);
+    document.getElementById("generateDictionaryFromDbBtn").addEventListener("click", generateDictionaryFromDatabase);
+    document.getElementById("generateDictionaryFromSqlBtn").addEventListener("click", generateDictionaryFromSql);
+    document.querySelectorAll(".toggle-password").forEach(button => {
+        button.addEventListener("click", () => togglePassword(button));
+    });
+
+    function currentConnection(prefix) {
+        return {
+            type: document.getElementById(prefix + "Type").value,
+            jdbcUrl: document.getElementById(prefix + "JdbcUrl").value.trim(),
+            host: document.getElementById(prefix + "Host").value.trim(),
+            port: parsePort(document.getElementById(prefix + "Port").value.trim()),
+            databaseName: document.getElementById(prefix + "Database").value.trim(),
+            schemaName: document.getElementById(prefix + "Schema").value.trim(),
+            username: document.getElementById(prefix + "Username").value.trim(),
+            password: document.getElementById(prefix + "Password").value
+        };
+    }
+
+    function parsePort(value) {
+        return value ? Number(value) : null;
+    }
+
+    function selectedTables() {
+        return [...document.querySelectorAll("input[name='tableName']:checked")].map(item => item.value);
+    }
+
+    async function loadTables() {
+        const sourceConnection = currentConnection("source");
+        if (sourceConnection.type === "DM" && !sourceConnection.schemaName) {
+            setStatus(dbStatus, "源数据库是 DM 时，必须填写源模式名(schemaName)。", true);
+            return;
+        }
+
+        setStatus(dbStatus, "正在读取表列表...");
+        tableList.innerHTML = "";
+
+        try {
+            const response = await fetch("/api/metadata/tables", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify(sourceConnection)
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.message || "读取表列表失败");
+            }
+
+            if (!data.tables || data.tables.length === 0) {
+                tableList.innerHTML = "<div>没有读取到表。</div>";
+                setStatus(dbStatus, "连接成功，但没有读取到表。");
+                return;
+            }
+
+            data.tables.forEach(tableName => {
+                const item = document.createElement("label");
+                item.className = "table-item";
+                item.innerHTML = `<input type="checkbox" name="tableName" value="${tableName}" checked> <span>${tableName}</span>`;
+                tableList.appendChild(item);
+            });
+            setStatus(dbStatus, "已读取 " + data.tables.length + " 张表。");
+        } catch (error) {
+            setStatus(dbStatus, error.message, true);
+        }
+    }
+
+    async function convertDatabase() {
+        const sourceConnection = currentConnection("source");
+        const targetConnection = currentConnection("target");
+        const targetSchema = document.getElementById("targetSchema").value.trim();
+
+        if (sourceConnection.type === "DM" && !sourceConnection.schemaName) {
+            setStatus(dbStatus, "源数据库是 DM 时，必须填写源模式名(schemaName)。", true);
+            return;
+        }
+        if (targetConnection.type === "DM" && !targetSchema) {
+            setStatus(dbStatus, "目标数据库是 DM 时，必须填写目标模式名(targetSchema)。", true);
+            return;
+        }
+
+        setStatus(dbStatus, "正在生成目标 SQL...");
+
+        const payload = {
+            source: sourceConnection,
+            target: targetConnection,
+            tables: selectedTables(),
+            includeData: document.getElementById("includeData").checked,
+            executeOnTarget: document.getElementById("executeOnTarget").checked,
+            targetSchema: targetSchema
+        };
+
+        try {
+            const response = await fetch("/api/conversions/database", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify(payload)
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.message || "数据库转换失败");
+            }
+
+            resultArea.value = data.fullScript || "";
+            setStatus(dbStatus, "转换完成，共处理 " + (data.tables ? data.tables.length : 0) + " 张表。"
+                + (data.executedOnTarget ? " 已执行到目标库。" : ""));
+        } catch (error) {
+            setStatus(dbStatus, error.message, true);
+        }
+    }
+
+    async function convertSqlFile() {
+        const file = document.getElementById("sqlFile").files[0];
+        const targetType = document.getElementById("sqlTargetType").value;
+        const targetSchema = document.getElementById("sqlTargetSchema").value.trim();
+        if (!file) {
+            setStatus(sqlStatus, "请先选择 SQL 文件。", true);
+            return;
+        }
+        if (targetType === "DM" && !targetSchema) {
+            setStatus(sqlStatus, "目标数据库是 DM 时，必须填写目标模式名(schemaName)。", true);
+            return;
+        }
+
+        setStatus(sqlStatus, "正在转换 SQL 文件...");
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("targetType", targetType);
+        formData.append("targetSchema", targetSchema);
+
+        try {
+            const response = await fetch("/api/conversions/sql-file", {
+                method: "POST",
+                body: formData
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.message || "SQL 文件转换失败");
+            }
+
+            resultArea.value = data.convertedSql || "";
+            setStatus(sqlStatus, "SQL 文件转换完成，目标类型：" + data.targetType);
+        } catch (error) {
+            setStatus(sqlStatus, error.message, true);
+        }
+    }
+
+    async function generateDictionaryFromDatabase() {
+        const template = document.getElementById("dictionaryTemplate").files[0];
+        const sourceConnection = currentConnection("source");
+        if (!template) {
+            setStatus(dictionaryStatus, "请先上传 Excel 模板。", true);
+            return;
+        }
+        if (sourceConnection.type === "DM" && !sourceConnection.schemaName) {
+            setStatus(dictionaryStatus, "源数据库是 DM 时，必须填写源模式名(schemaName)。", true);
+            return;
+        }
+
+        setStatus(dictionaryStatus, "正在根据源库生成数据字典...");
+        const formData = new FormData();
+        formData.append("template", template);
+        formData.append("source", JSON.stringify(sourceConnection));
+        formData.append("tables", JSON.stringify(selectedTables()));
+
+        try {
+            const response = await fetch("/api/dictionaries/database", {
+                method: "POST",
+                body: formData
+            });
+            if (!response.ok) {
+                const data = await response.json();
+                throw new Error(data.message || "数据字典生成失败");
+            }
+            await downloadResponseBlob(response, "data-dictionary-filled.xls");
+            setStatus(dictionaryStatus, "数据字典已生成并开始下载。");
+        } catch (error) {
+            setStatus(dictionaryStatus, error.message, true);
+        }
+    }
+
+    async function generateDictionaryFromSql() {
+        const template = document.getElementById("dictionaryTemplate").files[0];
+        const sqlFile = document.getElementById("dictionarySqlFile").files[0];
+        if (!template) {
+            setStatus(dictionaryStatus, "请先上传 Excel 模板。", true);
+            return;
+        }
+        if (!sqlFile) {
+            setStatus(dictionaryStatus, "请先上传建表 SQL 文件。", true);
+            return;
+        }
+
+        setStatus(dictionaryStatus, "正在根据 SQL 生成数据字典...");
+        const formData = new FormData();
+        formData.append("template", template);
+        formData.append("sqlFile", sqlFile);
+
+        try {
+            const response = await fetch("/api/dictionaries/sql-file", {
+                method: "POST",
+                body: formData
+            });
+            if (!response.ok) {
+                const data = await response.json();
+                throw new Error(data.message || "数据字典生成失败");
+            }
+            await downloadResponseBlob(response, "data-dictionary-filled.xls");
+            setStatus(dictionaryStatus, "数据字典已生成并开始下载。");
+        } catch (error) {
+            setStatus(dictionaryStatus, error.message, true);
+        }
+    }
+
+    function downloadResult() {
+        if (!resultArea.value.trim()) {
+            setStatus(sqlStatus, "当前没有可下载的 SQL 内容。", true);
+            return;
+        }
+
+        const blob = new Blob([resultArea.value], {type: "text/sql;charset=utf-8"});
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "converted-result.sql";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    }
+
+    async function downloadResponseBlob(response, fallbackFileName) {
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = resolveDownloadFileName(response, fallbackFileName);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    }
+
+    function resolveDownloadFileName(response, fallbackFileName) {
+        const disposition = response.headers.get("Content-Disposition") || "";
+        const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+        if (utf8Match) {
+            return decodeURIComponent(utf8Match[1]);
+        }
+        const normalMatch = disposition.match(/filename="?([^"]+)"?/i);
+        return normalMatch ? normalMatch[1] : fallbackFileName;
+    }
+
+    function setStatus(target, message, isError = false) {
+        target.textContent = message || "";
+        target.className = isError ? "status error" : "status";
+    }
+
+    function togglePassword(button) {
+        const input = document.getElementById(button.dataset.target);
+        const isPassword = input.type === "password";
+        input.type = isPassword ? "text" : "password";
+        button.dataset.visible = isPassword ? "true" : "false";
+        button.setAttribute("aria-label", isPassword ? "隐藏密码" : "显示密码");
+    }
+</script>
+</body>
+</html>
