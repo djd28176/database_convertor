@@ -157,11 +157,91 @@
             align-items: center;
             gap: 8px;
             font-size: 13px;
+            min-width: 0;
+            padding: 10px 12px;
+            margin-bottom: 0;
+            border-radius: 14px;
+            border: 1px solid rgba(216, 204, 185, 0.9);
+            background: rgba(255, 255, 255, 0.82);
+            color: var(--text);
+            cursor: pointer;
+            position: relative;
+            transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+        }
+
+        .table-item:hover {
+            border-color: rgba(15, 118, 110, 0.4);
+            box-shadow: 0 10px 20px rgba(15, 118, 110, 0.08);
+            transform: translateY(-1px);
         }
 
         .table-item input {
             width: auto;
             margin: 0;
+            flex: 0 0 auto;
+        }
+
+        .table-name {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            flex: 1 1 auto;
+        }
+
+        .table-tooltip {
+            position: fixed;
+            z-index: 999;
+            max-width: min(520px, calc(100vw - 32px));
+            padding: 12px 14px;
+            border-radius: 14px;
+            background: rgba(29, 27, 24, 0.98);
+            color: #fffdf8;
+            border: 1px solid rgba(255, 250, 242, 0.12);
+            box-shadow: 0 18px 40px rgba(25, 22, 19, 0.28);
+            font-size: 13px;
+            line-height: 1.7;
+            letter-spacing: 0.01em;
+            white-space: normal;
+            word-break: break-word;
+            pointer-events: none;
+            opacity: 0;
+            transform: translateY(6px);
+            transition: opacity 0.16s ease, transform 0.16s ease;
+        }
+
+        .table-tooltip.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .table-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+        }
+
+        .table-toolbar-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .table-toolbar button.mini-button {
+            width: auto;
+            min-width: 92px;
+            padding: 8px 12px;
+            font-size: 13px;
+            border-radius: 12px;
+            box-shadow: none;
+        }
+
+        .table-count {
+            font-size: 13px;
+            color: var(--muted);
         }
 
         .status {
@@ -173,6 +253,46 @@
 
         .status.error {
             color: var(--danger);
+        }
+
+        .progress-shell {
+            margin-top: 12px;
+            padding: 12px;
+            border-radius: 16px;
+            border: 1px solid rgba(216, 204, 185, 0.9);
+            background: rgba(255, 255, 255, 0.7);
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 10px;
+            overflow: hidden;
+            border-radius: 999px;
+            background: rgba(216, 204, 185, 0.9);
+        }
+
+        .progress-fill {
+            width: 0;
+            height: 100%;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #0f766e, #1d9a90);
+            transition: width 0.24s ease;
+        }
+
+        .progress-meta {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+            font-size: 13px;
+            color: var(--muted);
+        }
+
+        .progress-stage {
+            flex: 1 1 260px;
+            line-height: 1.6;
         }
 
         .actions {
@@ -370,10 +490,26 @@
 
             <div style="margin-top: 16px;">
                 <label>可选表</label>
+                <div class="table-toolbar">
+                    <div class="table-toolbar-actions">
+                        <button type="button" id="selectAllTablesBtn" class="secondary mini-button">一键全选</button>
+                        <button type="button" id="clearAllTablesBtn" class="secondary mini-button">一键不选</button>
+                    </div>
+                    <div id="tableSelectionCount" class="table-count">已选 0 / 0</div>
+                </div>
                 <div id="tableList" class="table-list"></div>
             </div>
 
             <div id="dbStatus" class="status"></div>
+            <div class="progress-shell">
+                <div class="progress-bar">
+                    <div id="dbProgressFill" class="progress-fill"></div>
+                </div>
+                <div class="progress-meta">
+                    <div id="dbProgressStage" class="progress-stage">等待开始转换。</div>
+                    <div id="dbProgressPercent">0%</div>
+                </div>
+            </div>
         </section>
 
         <section class="panel">
@@ -438,6 +574,7 @@
         <textarea id="resultArea" placeholder="这里会显示生成后的 SQL 或转换结果"></textarea>
     </section>
 </div>
+<div id="tableTooltip" class="table-tooltip" hidden></div>
 
 <script>
     const tableList = document.getElementById("tableList");
@@ -445,6 +582,11 @@
     const dbStatus = document.getElementById("dbStatus");
     const sqlStatus = document.getElementById("sqlStatus");
     const dictionaryStatus = document.getElementById("dictionaryStatus");
+    const dbProgressFill = document.getElementById("dbProgressFill");
+    const dbProgressStage = document.getElementById("dbProgressStage");
+    const dbProgressPercent = document.getElementById("dbProgressPercent");
+    const tableTooltip = document.getElementById("tableTooltip");
+    let dbTaskPollTimer = null;
 
     document.getElementById("loadTablesBtn").addEventListener("click", loadTables);
     document.getElementById("convertDbBtn").addEventListener("click", convertDatabase);
@@ -453,6 +595,8 @@
     document.getElementById("downloadBtn").addEventListener("click", downloadResult);
     document.getElementById("generateDictionaryFromDbBtn").addEventListener("click", generateDictionaryFromDatabase);
     document.getElementById("generateDictionaryFromSqlBtn").addEventListener("click", generateDictionaryFromSql);
+    document.getElementById("selectAllTablesBtn").addEventListener("click", () => setAllTableSelection(true));
+    document.getElementById("clearAllTablesBtn").addEventListener("click", () => setAllTableSelection(false));
     document.querySelectorAll(".toggle-password").forEach(button => {
         button.addEventListener("click", () => togglePassword(button));
     });
@@ -501,16 +645,12 @@
 
             if (!data.tables || data.tables.length === 0) {
                 tableList.innerHTML = "<div>没有读取到表。</div>";
+                updateTableSelectionCount();
                 setStatus(dbStatus, "连接成功，但没有读取到表。");
                 return;
             }
 
-            data.tables.forEach(tableName => {
-                const item = document.createElement("label");
-                item.className = "table-item";
-                item.innerHTML = `<input type="checkbox" name="tableName" value="${tableName}" checked> <span>${tableName}</span>`;
-                tableList.appendChild(item);
-            });
+            renderTableList(data.tables);
             setStatus(dbStatus, "已读取 " + data.tables.length + " 张表。");
         } catch (error) {
             setStatus(dbStatus, error.message, true);
@@ -532,6 +672,8 @@
         }
 
         setStatus(dbStatus, "正在生成目标 SQL...");
+        setDbWorkingState(true);
+        updateDbProgress(2, "任务已提交，等待后端开始处理...");
 
         const payload = {
             source: sourceConnection,
@@ -543,7 +685,7 @@
         };
 
         try {
-            const response = await fetch("/api/conversions/database", {
+            const response = await fetch("/api/conversions/database/tasks", {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify(payload)
@@ -552,11 +694,10 @@
             if (!response.ok) {
                 throw new Error(data.message || "数据库转换失败");
             }
-
-            resultArea.value = data.fullScript || "";
-            setStatus(dbStatus, "转换完成，共处理 " + (data.tables ? data.tables.length : 0) + " 张表。"
-                + (data.executedOnTarget ? " 已执行到目标库。" : ""));
+            pollDatabaseTask(data.taskId);
         } catch (error) {
+            setDbWorkingState(false);
+            updateDbProgress(0, "转换未开始。");
             setStatus(dbStatus, error.message, true);
         }
     }
@@ -708,6 +849,138 @@
         target.className = isError ? "status error" : "status";
     }
 
+    function setDbWorkingState(isWorking) {
+        ["loadTablesBtn", "convertDbBtn", "downloadDbBtn", "selectAllTablesBtn", "clearAllTablesBtn"].forEach(id => {
+            document.getElementById(id).disabled = isWorking;
+        });
+    }
+
+    function updateDbProgress(percent, message) {
+        const safePercent = Math.max(0, Math.min(100, Number(percent) || 0));
+        dbProgressFill.style.width = safePercent + "%";
+        dbProgressPercent.textContent = safePercent + "%";
+        dbProgressStage.textContent = message || "等待开始转换。";
+    }
+
+    function pollDatabaseTask(taskId) {
+        if (dbTaskPollTimer) {
+            clearTimeout(dbTaskPollTimer);
+        }
+
+        const poll = async () => {
+            try {
+                const response = await fetch("/api/conversions/database/tasks/" + encodeURIComponent(taskId));
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.message || "读取转换进度失败");
+                }
+
+                updateDbProgress(data.progressPercent, data.message);
+                if (data.status === "COMPLETED") {
+                    resultArea.value = data.result && data.result.fullScript ? data.result.fullScript : "";
+                    setStatus(dbStatus, "转换完成，共处理 "
+                        + (data.result && data.result.tables ? data.result.tables.length : data.totalTables || 0)
+                        + " 张表。"
+                        + (data.result && data.result.executedOnTarget ? " 已执行到目标库。" : ""));
+                    setDbWorkingState(false);
+                    dbTaskPollTimer = null;
+                    return;
+                }
+
+                if (data.status === "FAILED") {
+                    setStatus(dbStatus, data.message || "数据库转换失败", true);
+                    setDbWorkingState(false);
+                    dbTaskPollTimer = null;
+                    return;
+                }
+
+                dbTaskPollTimer = setTimeout(poll, 1000);
+            } catch (error) {
+                setStatus(dbStatus, error.message, true);
+                setDbWorkingState(false);
+                dbTaskPollTimer = null;
+            }
+        };
+
+        poll();
+    }
+
+    function renderTableList(tables) {
+        tableList.innerHTML = "";
+        tables.forEach(tableName => {
+            const item = document.createElement("label");
+            item.className = "table-item";
+            item.dataset.fullName = tableName;
+            item.innerHTML = `
+                <input type="checkbox" name="tableName" value="${escapeHtml(tableName)}" checked>
+                <span class="table-name">${escapeHtml(tableName)}</span>
+            `;
+            const checkbox = item.querySelector("input");
+            checkbox.addEventListener("change", updateTableSelectionCount);
+            item.addEventListener("mouseenter", event => showTableTooltip(event.currentTarget, event));
+            item.addEventListener("mousemove", event => moveTableTooltip(event));
+            item.addEventListener("mouseleave", hideTableTooltip);
+            tableList.appendChild(item);
+        });
+        updateTableSelectionCount();
+    }
+
+    function setAllTableSelection(checked) {
+        document.querySelectorAll("input[name='tableName']").forEach(item => {
+            item.checked = checked;
+        });
+        updateTableSelectionCount();
+    }
+
+    function updateTableSelectionCount() {
+        const checkboxes = [...document.querySelectorAll("input[name='tableName']")];
+        const selectedCount = checkboxes.filter(item => item.checked).length;
+        const counter = document.getElementById("tableSelectionCount");
+        counter.textContent = "已选 " + selectedCount + " / " + checkboxes.length;
+    }
+
+    function escapeHtml(value) {
+        return String(value)
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll("\"", "&quot;")
+            .replaceAll("'", "&#39;");
+    }
+
+    function showTableTooltip(item, event) {
+        const fullName = item.dataset.fullName || "";
+        const nameElement = item.querySelector(".table-name");
+        if (!fullName || !nameElement || nameElement.scrollWidth <= nameElement.clientWidth) {
+            hideTableTooltip();
+            return;
+        }
+        tableTooltip.textContent = fullName;
+        tableTooltip.hidden = false;
+        requestAnimationFrame(() => {
+            tableTooltip.classList.add("visible");
+            moveTableTooltip(event);
+        });
+    }
+
+    function moveTableTooltip(event) {
+        if (tableTooltip.hidden) {
+            return;
+        }
+        const offset = 18;
+        const maxLeft = window.innerWidth - tableTooltip.offsetWidth - 12;
+        const maxTop = window.innerHeight - tableTooltip.offsetHeight - 12;
+        const left = Math.min(event.clientX + offset, Math.max(12, maxLeft));
+        const top = Math.min(event.clientY + offset, Math.max(12, maxTop));
+        tableTooltip.style.left = left + "px";
+        tableTooltip.style.top = top + "px";
+    }
+
+    function hideTableTooltip() {
+        tableTooltip.classList.remove("visible");
+        tableTooltip.hidden = true;
+    }
+
     function togglePassword(button) {
         const input = document.getElementById(button.dataset.target);
         const isPassword = input.type === "password";
@@ -715,6 +988,8 @@
         button.dataset.visible = isPassword ? "true" : "false";
         button.setAttribute("aria-label", isPassword ? "隐藏密码" : "显示密码");
     }
+
+    updateTableSelectionCount();
 </script>
 </body>
 </html>

@@ -78,22 +78,52 @@ public class MetadataExtractionService {
 
     public List<Map<String, Object>> fetchTableData(DbConnectionRequest request, TableDefinition table, DatabaseDialect dialect)
             throws SQLException {
-        try (Connection connection = jdbcConnectionService.openConnection(request);
-             Statement statement = connection.createStatement();
+        return fetchTableData(request, table, dialect, null);
+    }
+
+    public List<Map<String, Object>> fetchTableData(DbConnectionRequest request, TableDefinition table,
+                                                    DatabaseDialect dialect,
+                                                    RowFetchProgressListener progressListener)
+            throws SQLException {
+        try (Connection connection = jdbcConnectionService.openConnection(request)) {
+            return fetchTableData(connection, request, table, dialect, progressListener);
+        }
+    }
+
+    public List<Map<String, Object>> fetchTableData(Connection connection,
+                                                    DbConnectionRequest request,
+                                                    TableDefinition table,
+                                                    DatabaseDialect dialect,
+                                                    RowFetchProgressListener progressListener)
+            throws SQLException {
+        try (Statement statement = connection.createStatement();
              ResultSet resultSet = statement.executeQuery("SELECT * FROM "
                      + dialect.qualifyName(table.getSchemaName(), table.getName()))) {
             log.info("开始读取表数据: dbType={}, table={}", request.type(), dialect.qualifyName(table.getSchemaName(), table.getName()));
             List<Map<String, Object>> rows = new ArrayList<>();
+            int rowCount = 0;
             while (resultSet.next()) {
                 Map<String, Object> row = new LinkedHashMap<>();
                 for (ColumnDefinition column : table.getColumns()) {
                     row.put(column.getName(), normalizeJdbcValue(resultSet.getObject(column.getName())));
                 }
                 rows.add(row);
+                rowCount++;
+                if (progressListener != null && rowCount % 200 == 0) {
+                    progressListener.onProgress(rowCount);
+                }
+            }
+            if (progressListener != null) {
+                progressListener.onProgress(rowCount);
             }
             log.info("表数据读取完成: table={}, rowCount={}", table.getName(), rows.size());
             return rows;
         }
+    }
+
+    @FunctionalInterface
+    public interface RowFetchProgressListener {
+        void onProgress(int rowCount);
     }
 
     private List<String> listTablesFromConnection(DbConnectionRequest request, Connection connection) throws SQLException {

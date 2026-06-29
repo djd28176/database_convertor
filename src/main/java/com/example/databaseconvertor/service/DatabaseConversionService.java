@@ -48,37 +48,80 @@ public class DatabaseConversionService {
     }
 
     public ConversionResultResponse convert(DatabaseConversionRequest request) throws SQLException {
+        return convert(request, ProgressUpdateListener.NO_OP);
+    }
+
+    public ConversionResultResponse convert(DatabaseConversionRequest request,
+                                            ProgressUpdateListener progressListener) throws SQLException {
         validate(request);
 
         DatabaseDialect sourceDialect = dialectFactory.getDialect(request.source().type());
         DatabaseDialect targetDialect = dialectFactory.getDialect(request.target().type());
         boolean includeData = Boolean.TRUE.equals(request.includeData());
         String targetSchema = resolveTargetSchema(request);
+        progressListener.onProgress(new ProgressUpdate(
+                5, "正在读取源库表结构...", 0, 0, null));
         log.info("开始数据库转换: sourceType={}, targetType={}, includeData={}, executeOnTarget={}, targetSchema={}",
                 request.source().type(), request.target().type(), includeData, request.executeOnTarget(), targetSchema);
 
         List<TableDefinition> tables = metadataExtractionService.extractTables(request.source(), request.tables());
+        progressListener.onProgress(new ProgressUpdate(
+                12, "表结构读取完成，开始生成目标 SQL...", 0, tables.size(), null));
         List<String> tableNames = new ArrayList<>();
         List<String> ddlStatements = new ArrayList<>();
         List<String> dataStatements = new ArrayList<>();
         List<String> indexStatements = new ArrayList<>();
         List<String> foreignKeyStatements = new ArrayList<>();
 
-        for (TableDefinition table : tables) {
-            tableNames.add(table.getName());
-            log.info("生成表脚本: table={}, targetType={}", table.getName(), request.target().type());
-            ddlStatements.add(targetDialect.createTable(table, targetSchema));
+        try (Connection sourceConnection = includeData ? jdbcConnectionService.openConnection(request.source()) : null) {
+            for (int i = 0; i < tables.size(); i++) {
+                TableDefinition table = tables.get(i);
+                int tableIndex = i;
+                String tableName = table.getName();
+                tableNames.add(table.getName());
+                log.info("生成表脚本: table={}, targetType={}", table.getName(), request.target().type());
+                progressListener.onProgress(new ProgressUpdate(
+                        progressByTable(tableIndex, tables.size(), includeData, Boolean.TRUE.equals(request.executeOnTarget())),
+                        "正在生成第 " + (tableIndex + 1) + "/" + tables.size() + " 张表: " + tableName,
+                        tableIndex,
+                        tables.size(),
+                        tableName));
+                ddlStatements.add(targetDialect.createTable(table, targetSchema));
 
-            if (includeData) {
-                List<Map<String, Object>> rows = metadataExtractionService.fetchTableData(request.source(), table, sourceDialect);
-                String insertStatements = targetDialect.createInsertStatements(table, rows, targetSchema);
-                if (!insertStatements.isBlank()) {
-                    dataStatements.add(insertStatements);
+                if (includeData) {
+                    progressListener.onProgress(new ProgressUpdate(
+                            progressByTable(tableIndex, tables.size(), true, Boolean.TRUE.equals(request.executeOnTarget())),
+                            "正在读取表数据: " + tableName,
+                            tableIndex,
+                            tables.size(),
+                            tableName));
+                    List<Map<String, Object>> rows = metadataExtractionService.fetchTableData(
+                            sourceConnection,
+                            request.source(),
+                            table,
+                            sourceDialect,
+                            rowCount -> progressListener.onProgress(new ProgressUpdate(
+                                    progressByTable(tableIndex, tables.size(), true, Boolean.TRUE.equals(request.executeOnTarget())),
+                                    "正在读取表 " + tableName + " 的数据，已读取 " + rowCount + " 行",
+                                    tableIndex,
+                                    tables.size(),
+                                    tableName))
+                    );
+                    String insertStatements = targetDialect.createInsertStatements(table, rows, targetSchema);
+                    if (!insertStatements.isBlank()) {
+                        dataStatements.add(insertStatements);
+                    }
                 }
-            }
 
-            indexStatements.addAll(targetDialect.createIndexes(table, targetSchema));
-            foreignKeyStatements.addAll(targetDialect.createForeignKeys(table, targetSchema));
+                indexStatements.addAll(targetDialect.createIndexes(table, targetSchema));
+                foreignKeyStatements.addAll(targetDialect.createForeignKeys(table, targetSchema));
+                progressListener.onProgress(new ProgressUpdate(
+                        progressByTable(i + 1, tables.size(), includeData, Boolean.TRUE.equals(request.executeOnTarget())),
+                        "已完成第 " + (i + 1) + "/" + tables.size() + " 张表: " + table.getName(),
+                        i + 1,
+                        tables.size(),
+                        table.getName()));
+            }
         }
 
         String ddlScript = joinSections(ddlStatements, indexStatements, foreignKeyStatements);
@@ -86,6 +129,12 @@ public class DatabaseConversionService {
         if (!ddlScript.isBlank()) {
             ddlScript = targetDialect.transformSql(ddlScript, targetSchema);
         }
+        progressListener.onProgress(new ProgressUpdate(
+                Boolean.TRUE.equals(request.executeOnTarget()) ? 84 : 100,
+                Boolean.TRUE.equals(request.executeOnTarget()) ? "SQL 生成完成，准备执行到目标库..." : "SQL 生成完成。",
+                tables.size(),
+                tables.size(),
+                tables.isEmpty() ? null : tables.get(tables.size() - 1).getName()));
         String fullScript = joinSections(ddlStatements, dataStatements, indexStatements, foreignKeyStatements);
         if (!fullScript.isBlank()) {
             String normalizedDdlAndStructure = joinSections(ddlStatements, indexStatements, foreignKeyStatements);
@@ -99,7 +148,7 @@ public class DatabaseConversionService {
         if (Boolean.TRUE.equals(request.executeOnTarget())) {
             log.info("开始执行目标库脚本: targetType={}, statementCount={}",
                     request.target().type(), SqlStatementUtils.splitStatements(fullScript).size());
-            executeScript(request, fullScript);
+            executeScript(request, fullScript, progressListener);
             executedOnTarget = true;
             log.info("目标库脚本执行完成: targetType={}", request.target().type());
         }
@@ -109,27 +158,36 @@ public class DatabaseConversionService {
         return new ConversionResultResponse(tableNames, ddlScript, dataScript, fullScript, executedOnTarget);
     }
 
-    private void executeScript(DatabaseConversionRequest request, String script) throws SQLException {
+    private void executeScript(DatabaseConversionRequest request, String script,
+                               ProgressUpdateListener progressListener) throws SQLException {
         try (Connection connection = jdbcConnectionService.openConnection(request.target());
              Statement statement = connection.createStatement()) {
             if (request.target().type() == DatabaseType.SQLSERVER || request.target().type() == DatabaseType.DM) {
-                executeIdentityAwareScript(connection, statement, request, script);
+                executeIdentityAwareScript(connection, statement, request, script, progressListener);
                 return;
             }
-            for (String sql : SqlStatementUtils.splitStatements(script)) {
+            List<String> statements = SqlStatementUtils.splitStatements(script);
+            for (int i = 0; i < statements.size(); i++) {
+                String sql = statements.get(i);
+                reportExecutionProgress(progressListener, i, statements.size());
                 statement.execute(sql);
             }
+            reportExecutionProgress(progressListener, statements.size(), statements.size());
         }
     }
 
     private void executeIdentityAwareScript(Connection connection, Statement statement,
-                                            DatabaseConversionRequest request, String script) throws SQLException {
+                                            DatabaseConversionRequest request, String script,
+                                            ProgressUpdateListener progressListener) throws SQLException {
         Map<String, Set<String>> identityColumnsCache = new HashMap<>();
         String activeIdentityTable = null;
         DatabaseType targetType = request.target().type();
+        List<String> statements = SqlStatementUtils.splitStatements(script);
 
-        for (String sql : SqlStatementUtils.splitStatements(script)) {
+        for (int i = 0; i < statements.size(); i++) {
+            String sql = statements.get(i);
             String trimmedSql = sql.trim();
+            reportExecutionProgress(progressListener, i, statements.size());
             log.debug("执行 identity 感知 SQL: targetType={}, sql={}", targetType, abbreviateSql(trimmedSql));
             Matcher identityInsertMatcher = IDENTITY_INSERT_PATTERN.matcher(trimmedSql);
             if (identityInsertMatcher.matches()) {
@@ -161,6 +219,7 @@ public class DatabaseConversionService {
 
             statement.execute(trimmedSql);
         }
+        reportExecutionProgress(progressListener, statements.size(), statements.size());
     }
 
     private IdentityInsertInfo parseIdentityInsert(String sql, DatabaseConversionRequest request,
@@ -258,6 +317,34 @@ public class DatabaseConversionService {
         return normalized.length() > 220 ? normalized.substring(0, 220) + " ..." : normalized;
     }
 
+    private int progressByTable(int completedTables, int totalTables, boolean includeData, boolean executeOnTarget) {
+        int start = 12;
+        int end = executeOnTarget ? 82 : 96;
+        if (totalTables <= 0) {
+            return start;
+        }
+        double ratio = Math.max(0, Math.min(1, completedTables / (double) totalTables));
+        int progress = start + (int) Math.round((end - start) * ratio);
+        if (!includeData) {
+            return Math.min(progress + 4, end);
+        }
+        return progress;
+    }
+
+    private void reportExecutionProgress(ProgressUpdateListener progressListener, int completedStatements, int totalStatements) {
+        int progress = totalStatements <= 0
+                ? 92
+                : 84 + (int) Math.round((16D * completedStatements) / totalStatements);
+        progressListener.onProgress(new ProgressUpdate(
+                Math.min(progress, 100),
+                totalStatements <= 0
+                        ? "正在执行目标库脚本..."
+                        : "正在执行目标库脚本，已完成 " + completedStatements + " / " + totalStatements + " 条语句",
+                0,
+                0,
+                null));
+    }
+
     private void validate(DatabaseConversionRequest request) {
         if (request == null) {
             throw new IllegalArgumentException("Conversion request is required.");
@@ -310,5 +397,22 @@ public class DatabaseConversionService {
             String tableName,
             Set<String> columnNames
     ) {
+    }
+
+    public record ProgressUpdate(
+            int progressPercent,
+            String message,
+            int completedTables,
+            int totalTables,
+            String currentTable
+    ) {
+    }
+
+    @FunctionalInterface
+    public interface ProgressUpdateListener {
+        ProgressUpdateListener NO_OP = update -> {
+        };
+
+        void onProgress(ProgressUpdate update);
     }
 }
